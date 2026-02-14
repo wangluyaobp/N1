@@ -9,6 +9,7 @@ export const supabase = createClient(url, anon, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storage: localStorage,
-    storageKey: "srs-pwa-auth", // ✅ 新增：更稳，避免某些环境下 key 冲突/被覆盖
+    storageKey: "srs-pwa-auth",
+    flowType: "pkce", // ✅ 关键：避免 hash(#) 冲突，手机端更稳
   },
 });

@@ -32,7 +32,7 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
     setBusy(true);
     try {
       // ✅ Hash 路由：确保回跳到 /#/
-      const redirectTo = `${window.location.origin}/#/`;
+      const redirectTo = `${window.location.origin}/`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: redirectTo },
