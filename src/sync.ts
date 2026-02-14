@@ -53,3 +53,9 @@ export async function syncFromCloud(type: DeckType) {
 
   await putCards(upserts);
 }
+
+// ✅ 新增：同步全部（单词 + 文法）
+export async function syncAllFromCloud() {
+  await syncFromCloud("vocab");
+  await syncFromCloud("grammar");
+}
