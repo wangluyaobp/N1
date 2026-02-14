@@ -43,13 +43,14 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
     }
   }
 
-  async function signIn() {
+  // ✅ 邮箱 OTP 登录（备用）
+  async function signInEmail() {
     if (cooldown > 0) return;
 
     setMsg("");
     setBusy(true);
     try {
-      // ✅ 用 PKCE + 非 hash 回跳（配合你 supabase.ts 的 flowType: pkce）
+      // ✅ PKCE + 非 hash 回跳
       const redirectTo = `${window.location.origin}/`;
 
       const { error } = await supabase.auth.signInWithOtp({
@@ -63,8 +64,25 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
       }
 
       setMsg("已发送登录邮件，请去邮箱点链接完成登录。");
-      // ✅ 冷却 60 秒，避免 email rate limit exceeded
+      // ✅ 冷却 60 秒（避免误点；真正的 Supabase 限流可能更长）
       setCooldown(60);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ✅ Google OAuth 登录（推荐：几乎不受邮件限流影响）
+  async function signInGoogle() {
+    setMsg("");
+    setBusy(true);
+    try {
+      const redirectTo = `${window.location.origin}/`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
+      });
+      if (error) setMsg(error.message);
+      // 成功会跳转到 Google，回来后由 onAuthStateChange 接管并自动同步
     } finally {
       setBusy(false);
     }
@@ -120,20 +138,34 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
       <div className="space" />
 
       {!sessionEmail ? (
-        <div className="row">
-          <input
-            value={emailInput}
-            onChange={(e) => setEmailInput(e.target.value)}
-            placeholder="输入邮箱登录（会发确认邮件）"
-          />
-          <button
-            className="btn primary"
-            onClick={signIn}
-            disabled={busy || cooldown > 0 || !emailInput.includes("@")}
-            title={cooldown > 0 ? `请等待 ${cooldown}s 再发送` : ""}
-          >
-            {cooldown > 0 ? `请等待 ${cooldown}s` : "登录"}
-          </button>
+        <div style={{ display: "grid", gap: 8 }}>
+          {/* ✅ Google 登录（推荐） */}
+          <div className="row">
+            <button className="btn primary" onClick={signInGoogle} disabled={busy}>
+              使用 Google 登录（推荐）
+            </button>
+          </div>
+
+          <div className="muted">若频繁遇到邮件限流，优先用 Google 登录。</div>
+
+          <div className="space" />
+
+          {/* ✅ 邮箱登录（备用） */}
+          <div className="row">
+            <input
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              placeholder="邮箱登录（会发确认邮件）"
+            />
+            <button
+              className="btn"
+              onClick={signInEmail}
+              disabled={busy || cooldown > 0 || !emailInput.includes("@")}
+              title={cooldown > 0 ? `请等待 ${cooldown}s 再发送` : ""}
+            >
+              {cooldown > 0 ? `请等待 ${cooldown}s` : "邮箱登录"}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="row">
