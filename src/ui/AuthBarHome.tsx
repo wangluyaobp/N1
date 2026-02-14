@@ -1,44 +1,70 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { syncAllFromCloud } from "../sync";
 
 export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
-  const [email, setEmail] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  // 防止“登录事件触发同步”重复跑
+  const syncingRef = useRef(false);
 
   async function refreshSession() {
-    const { data } = await supabase.auth.getSession();
-    setSessionEmail(data.session?.user.email ?? null);
+    // 1) 先读 session
+    const { data: s } = await supabase.auth.getSession();
+    const e1 = s.session?.user.email ?? null;
+    if (e1) {
+      setSessionEmail(e1);
+      return;
+    }
+    // 2) session 读不到再读 user（在部分手机环境更稳）
+    const { data: u } = await supabase.auth.getUser();
+    setSessionEmail(u.user?.email ?? null);
   }
 
-  async function syncAll() {
+  async function syncAll(reason?: string) {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+
     setMsg("");
     setBusy(true);
     try {
       await syncAllFromCloud();
       if (props.onSynced) await props.onSynced();
-      setMsg("同步完成（单词 + 文法：云端 → 本机）");
+      setMsg(reason ? `同步完成（${reason}）` : "同步完成（单词 + 文法：云端 → 本机）");
     } catch (e: any) {
       setMsg(e?.message ?? "同步失败");
     } finally {
       setBusy(false);
+      syncingRef.current = false;
     }
   }
 
   async function signIn() {
+    if (cooldown > 0) return;
+
     setMsg("");
     setBusy(true);
     try {
-      // ✅ Hash 路由：确保回跳到 /#/
+      // ✅ 用 PKCE + 非 hash 回跳（配合你 supabase.ts 的 flowType: pkce）
       const redirectTo = `${window.location.origin}/`;
+
       const { error } = await supabase.auth.signInWithOtp({
-        email,
+        email: emailInput,
         options: { emailRedirectTo: redirectTo },
       });
-      if (error) setMsg(error.message);
-      else setMsg("已发送登录邮件，请去邮箱点链接完成登录。");
+
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+
+      setMsg("已发送登录邮件，请去邮箱点链接完成登录。");
+      // ✅ 冷却 60 秒，避免 email rate limit exceeded
+      setCooldown(60);
     } finally {
       setBusy(false);
     }
@@ -48,6 +74,7 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
     setBusy(true);
     try {
       await supabase.auth.signOut();
+      setSessionEmail(null);
       setMsg("已退出登录");
     } finally {
       setBusy(false);
@@ -55,22 +82,33 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
   }
 
   useEffect(() => {
-    // 进来先刷新一次 session（用于“刷新不掉登录”验证）
     refreshSession();
 
-    // ✅ 监听登录状态变化：登录成功后自动同步全部
+    // ✅ 再延迟读一次，兜住“刚写入 storage 的瞬间”
+    const t = setTimeout(() => refreshSession(), 300);
+
+    // ✅ 登录状态变化：登录成功后自动同步一次
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSessionEmail(session?.user.email ?? null);
+      const mail = session?.user.email ?? null;
+      setSessionEmail(mail);
 
       if (session?.user) {
-        // 登录成功后自动同步
-        await syncAll();
+        await syncAll("登录后自动同步：云端→本机");
       }
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      clearTimeout(t);
+      sub.subscription.unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const it = setInterval(() => setCooldown((c) => c - 1), 1000);
+    return () => clearInterval(it);
+  }, [cooldown]);
 
   return (
     <div className="card" style={{ padding: 12 }}>
@@ -84,17 +122,22 @@ export function AuthBarHome(props: { onSynced?: () => Promise<void> }) {
       {!sessionEmail ? (
         <div className="row">
           <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
             placeholder="输入邮箱登录（会发确认邮件）"
           />
-          <button className="btn primary" onClick={signIn} disabled={busy || !email.includes("@")}>
-            登录
+          <button
+            className="btn primary"
+            onClick={signIn}
+            disabled={busy || cooldown > 0 || !emailInput.includes("@")}
+            title={cooldown > 0 ? `请等待 ${cooldown}s 再发送` : ""}
+          >
+            {cooldown > 0 ? `请等待 ${cooldown}s` : "登录"}
           </button>
         </div>
       ) : (
         <div className="row">
-          <button className="btn primary" onClick={syncAll} disabled={busy}>
+          <button className="btn primary" onClick={() => syncAll()} disabled={busy}>
             同步全部（云端→本机）
           </button>
           <button className="btn" onClick={signOut} disabled={busy}>
