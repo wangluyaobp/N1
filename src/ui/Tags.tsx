@@ -5,6 +5,14 @@ import { deleteTagAndCards, putCards, putCard, putTag } from "../db";
 import { Toast } from "./Toast";
 import { EditCard } from "./EditCard";
 
+// ✅ 云端同步：新增
+import {
+  cloudUpsertTag,
+  cloudSoftDeleteTag,
+  cloudUpsertCard,
+  cloudSoftDeleteCard,
+} from "../cloud";
+
 export function Tags(props: {
   type: DeckType;
   tags: BatchTag[];
@@ -18,7 +26,7 @@ export function Tags(props: {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(""), 1600);
+    const t = setTimeout(() => setToast(""), 1800);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -31,12 +39,12 @@ export function Tags(props: {
   // ✅ 这里用 null 表示“未选中任何标签”（不显示下方列表）
   const selectedTag = useMemo(() => {
     if (props.activeTagId === "ALL") return null;
-    return props.tags.find(t => t.id === props.activeTagId) ?? null;
+    return props.tags.find((t) => t.id === props.activeTagId) ?? null;
   }, [props.activeTagId, props.tags]);
 
   const cardsInSelectedTag = useMemo(() => {
     if (!selectedTag) return [];
-    return props.cards.filter(c => c.tagId === selectedTag.id);
+    return props.cards.filter((c) => c.tagId === selectedTag.id);
   }, [props.cards, selectedTag]);
 
   async function onImport(file?: File | null) {
@@ -44,12 +52,27 @@ export function Tags(props: {
     try {
       const { tagId, tagName, cards } = await parseCsv(file, props.type);
       const tag: BatchTag = { id: tagId, type: props.type, name: tagName, createdAt: Date.now() };
+
+      // 1) 本地保存
       await putTag(tag);
       await putCards(cards);
+
+      // 2) ✅ 云端保存（已登录才会成功；未登录就跳过）
+      try {
+        await cloudUpsertTag(tag);
+        for (const c of cards) {
+          await cloudUpsertCard(c);
+        }
+        setToast(`导入成功：${cards.length} 张（已上传云端）`);
+      } catch (e) {
+        // 没登录/网络问题等：不影响本地使用
+        setToast(`导入成功：${cards.length} 张（未上传云端）`);
+        console.warn("cloud upload skipped/failed:", e);
+      }
+
       await props.onRefresh();
       props.setActiveTagId(tagId); // 导入后自动选中该标签
       setEditing(null);
-      setToast(`导入成功：${cards.length} 张（标签：${tagName}）`);
     } catch (e: any) {
       setToast(`导入失败：${e?.message ?? "未知错误"}`);
     }
@@ -58,9 +81,22 @@ export function Tags(props: {
   async function rename(tag: BatchTag) {
     const name = prompt("请输入新的标签名：", tag.name);
     if (!name) return;
-    await putTag({ ...tag, name: name.trim() });
+
+    const newTag = { ...tag, name: name.trim() };
+
+    // 1) 本地更新
+    await putTag(newTag);
+
+    // 2) ✅ 云端更新（失败不影响本地）
+    try {
+      await cloudUpsertTag(newTag);
+      setToast("已修改标签名（已同步云端）");
+    } catch (e) {
+      setToast("已修改标签名（未同步云端）");
+      console.warn("cloud rename skipped/failed:", e);
+    }
+
     await props.onRefresh();
-    setToast("已修改标签名");
   }
 
   async function remove(tag: BatchTag) {
@@ -73,16 +109,43 @@ export function Tags(props: {
       setEditing(null);
     }
 
+    // 1) 本地删除
     await deleteTagAndCards(tag.id);
+
+    // 2) ✅ 云端软删除 tag + 软删除其下 cards（失败不影响本地）
+    try {
+      await cloudSoftDeleteTag(tag.id);
+
+      // 把该标签下的卡片也标记 deleted，确保其他设备同步后会消失
+      const cardsToDelete = props.cards.filter((c) => c.tagId === tag.id);
+      for (const c of cardsToDelete) {
+        await cloudSoftDeleteCard(c.id);
+      }
+
+      setToast("已删除标签及其卡片（已同步云端）");
+    } catch (e) {
+      setToast("已删除标签及其卡片（未同步云端）");
+      console.warn("cloud delete skipped/failed:", e);
+    }
+
     await props.onRefresh();
-    setToast("已删除标签及其卡片");
   }
 
   async function saveEdit(card: AnyCard) {
+    // 1) 本地保存
     await putCard(card);
+
+    // 2) ✅ 云端保存（失败不影响本地）
+    try {
+      await cloudUpsertCard(card);
+      setToast("已保存（已同步云端）");
+    } catch (e) {
+      setToast("已保存（未同步云端）");
+      console.warn("cloud save skipped/failed:", e);
+    }
+
     setEditing(null);
     await props.onRefresh();
-    setToast("已保存");
   }
 
   // ✅ 点击标签卡片：未选中 -> 选中；已选中 -> 取消选中（不显示下方列表）
@@ -192,7 +255,6 @@ export function Tags(props: {
           <hr />
           <div className="space" />
 
-          {/* ✅ 你要求：删除“标签内对应：xxx（n）”标题，所以这里不显示标题 */}
           <div className="muted">这里筛选后可直接编辑对应（单词/文法都支持）。</div>
           <div className="space" />
 

@@ -1,3 +1,4 @@
+import { AuthBar } from "./AuthBar";
 import { useEffect, useMemo, useState } from "react";
 import type { AnyCard, BatchTag, DeckType } from "../types";
 import { Layout } from "./Layout";
@@ -5,7 +6,6 @@ import { Cards } from "./Cards";
 import { Study } from "./Study";
 import { Tags } from "./Tags";
 import { listCardsByType, listTags } from "../db";
-import { AuthBar } from "./AuthBar"; // ✅ 新增
 
 type Tab = "tags" | "cards" | "study";
 
@@ -23,33 +23,20 @@ export function Module(props: { type: DeckType; go: (p: "/" | "/vocab" | "/gramm
     setCards(c);
   }
 
-  useEffect(() => {
-    refresh();
-  }, [props.type]);
+  useEffect(() => { refresh(); }, [props.type]);
 
   const filteredCards = useMemo(() => {
     if (activeTagId === "ALL") return cards;
-    return cards.filter((c) => c.tagId === activeTagId);
+    return cards.filter(c => c.tagId === activeTagId);
   }, [cards, activeTagId]);
 
   return (
     <Layout title={title} onBack={() => props.go("/")}>
       <div className="row">
-        <button className={"btn" + (tab === "tags" ? " primary" : "")} onClick={() => setTab("tags")}>
-          标签/导入
-        </button>
-        <button className={"btn" + (tab === "cards" ? " primary" : "")} onClick={() => setTab("cards")}>
-          配合管理
-        </button>
-        <button className={"btn" + (tab === "study" ? " primary" : "")} onClick={() => setTab("study")}>
-          学习
-        </button>
+        <button className={"btn" + (tab === "tags" ? " primary" : "")} onClick={() => setTab("tags")}>标签/导入</button>
+        <button className={"btn" + (tab === "cards" ? " primary" : "")} onClick={() => setTab("cards")}>配合管理</button>
+        <button className={"btn" + (tab === "study" ? " primary" : "")} onClick={() => setTab("study")}>学习</button>
       </div>
-
-      <div className="space" />
-
-      {/* ✅ 新增：云同步登录条（放在 tabs 下面，三页都能看到） */}
-      <AuthBar type={props.type} onSynced={refresh} />
 
       <div className="space" />
 
@@ -70,8 +57,8 @@ export function Module(props: { type: DeckType; go: (p: "/" | "/vocab" | "/gramm
           tags={tags}
           cards={filteredCards}
           onRefresh={refresh}
-          activeTagId={activeTagId}
-          setActiveTagId={setActiveTagId}
+          activeTagId={activeTagId}              // ✅ 新增：传入当前筛选标签
+          setActiveTagId={setActiveTagId}        // ✅ 新增：传入切换筛选标签方法
         />
       )}
 
