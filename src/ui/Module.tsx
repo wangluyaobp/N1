@@ -5,7 +5,7 @@ import { Cards } from "./Cards";
 import { Study } from "./Study";
 import { Tags } from "./Tags";
 import { listCardsByType, listTags } from "../db";
-import { AuthBar } from "./AuthBar"; // ✅ 新增
+import { AuthBar } from "./AuthBar"; // ✅ 只读状态栏
 
 type Tab = "tags" | "cards" | "study";
 
@@ -48,8 +48,8 @@ export function Module(props: { type: DeckType; go: (p: "/" | "/vocab" | "/gramm
 
       <div className="space" />
 
-      {/* ✅ 新增：云同步登录条（放在 tabs 下面，三页都能看到） */}
-      <AuthBar type={props.type} onSynced={refresh} />
+      {/* ✅ 只显示登录状态（登录/同步放到首页做） */}
+      <AuthBar />
 
       <div className="space" />
 
@@ -75,14 +75,7 @@ export function Module(props: { type: DeckType; go: (p: "/" | "/vocab" | "/gramm
         />
       )}
 
-      {tab === "study" && (
-        <Study
-          type={props.type}
-          tags={tags}
-          cards={filteredCards}
-          onUpdated={refresh}
-        />
-      )}
+      {tab === "study" && <Study type={props.type} tags={tags} cards={filteredCards} onUpdated={refresh} />}
     </Layout>
   );
 }
