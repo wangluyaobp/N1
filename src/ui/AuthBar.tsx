@@ -13,11 +13,26 @@ export function AuthBar(props: { type: DeckType; onSynced: () => Promise<void> }
     setSessionEmail(data.session?.user.email ?? null);
   }
 
-  useEffect(() => {
-    refreshSession();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => refreshSession());
-    return () => sub.subscription.unsubscribe();
-  }, []);
+useEffect(() => {
+  refreshSession();
+
+  const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    await refreshSession();
+    // ✅ 登录成功后自动同步一次
+    if (session?.user) {
+      try {
+        await syncFromCloud(props.type);
+        await props.onSynced();
+        setMsg("已登录并自动同步完成");
+      } catch (e: any) {
+        setMsg(e?.message ?? "自动同步失败");
+      }
+    }
+  });
+
+  return () => sub.subscription.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   async function signIn() {
     setMsg("");
