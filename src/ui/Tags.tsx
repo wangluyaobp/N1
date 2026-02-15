@@ -109,7 +109,6 @@ export function Tags(props: {
       await putTag(tag);
       await putCards(cards);
 
-      // ✅ 导入 CSV 属于本地改动
       markDirty(props.type);
       setStatusTick((x) => x + 1);
 
@@ -127,7 +126,6 @@ export function Tags(props: {
     if (!name) return;
     await putTag({ ...tag, name: name.trim() });
 
-    // ✅ 改名属于本地改动
     markDirty(props.type);
     setStatusTick((x) => x + 1);
 
@@ -146,7 +144,6 @@ export function Tags(props: {
 
     await deleteTagAndCards(tag.id);
 
-    // ✅ 删除属于本地改动
     markDirty(props.type);
     setStatusTick((x) => x + 1);
 
@@ -158,7 +155,6 @@ export function Tags(props: {
     await putCard(card);
     setEditing(null);
 
-    // ✅ 编辑属于本地改动
     markDirty(props.type);
     setStatusTick((x) => x + 1);
 
@@ -190,7 +186,6 @@ export function Tags(props: {
       if (localTags.length > 0) await cloudUpsertTags(localTags);
       if (localCards.length > 0) await cloudUpsertCards(localCards);
 
-      // ✅ 上传成功：清掉“未上传”标记，记录时间
       clearDirty(props.type);
       setLastPush(props.type);
       setStatusTick((x) => x + 1);
@@ -214,7 +209,6 @@ export function Tags(props: {
       await syncFromCloud(props.type);
       await props.onRefresh();
 
-      // ✅ 导入成功：本机已对齐云端（至少刚同步完）
       clearDirty(props.type);
       setLastPull(props.type);
       setStatusTick((x) => x + 1);
@@ -246,7 +240,7 @@ export function Tags(props: {
       <div className="space" />
 
       {/* ✅ 上传/导入按钮 */}
-      <div className="row">
+      <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
         <button className="btn primary" onClick={pushLocalToCloud} disabled={busy || !sessionEmail}>
           上传（本机→云端）
         </button>
@@ -260,17 +254,9 @@ export function Tags(props: {
 
       <div className="space" />
 
-      <div className="row">
+      {/* ✅ 只保留文件导入，不要“查看全部” */}
+      <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
         <input type="file" accept=".csv,text/csv" onChange={(e) => onImport(e.target.files?.[0])} />
-        <button
-          className="btn"
-          onClick={() => {
-            props.setActiveTagId("ALL");
-            setEditing(null);
-          }}
-        >
-          查看全部（{props.cards.length}）
-        </button>
       </div>
 
       <div className="space" />
@@ -280,7 +266,8 @@ export function Tags(props: {
 
       <div className="space" />
 
-      <div className="row">
+      {/* ✅ 改成“一行一个”的标签列表（手机更好看） */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {props.tags.map((t) => {
           const isSelected = props.activeTagId === t.id;
 
@@ -290,7 +277,6 @@ export function Tags(props: {
               className="card"
               style={{
                 padding: 12,
-                minWidth: 260,
                 position: "relative",
                 cursor: "pointer",
                 outline: isSelected ? "2px solid #3a7afe" : "none",
@@ -298,13 +284,14 @@ export function Tags(props: {
               onClick={() => toggleSelect(t.id)}
               title={isSelected ? "再次点击取消选中" : "点击选中"}
             >
+              {/* ✅ 选中角标保留（更小一点，不挡内容） */}
               {isSelected && (
                 <div
                   style={{
                     position: "absolute",
                     top: 10,
                     right: 10,
-                    padding: "6px 10px",
+                    padding: "4px 8px",
                     borderRadius: 999,
                     background: "#fff",
                     color: "#000",
@@ -316,24 +303,41 @@ export function Tags(props: {
                 </div>
               )}
 
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>{t.name}</div>
+              {/* ✅ 单行布局：左信息，右按钮（按钮永远靠右，不掉下面） */}
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "nowrap",
+                  gap: 10,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{t.name}</div>
                   <div className="muted">{countByTag.get(t.id) ?? 0} 张</div>
                 </div>
-              </div>
 
-              <div className="space" />
-
-              <div className="row" onClick={(e) => e.stopPropagation()}>
-                <button className="btn" onClick={() => rename(t)}>改名</button>
-                <button className="btn danger" onClick={() => remove(t)}>删除整批</button>
+                {/* ✅ 按钮区域固定在右侧 */}
+                <div
+                  className="row"
+                  style={{ gap: 10, flexShrink: 0, flexWrap: "nowrap" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button className="btn" onClick={() => rename(t)}>
+                    改名
+                  </button>
+                  <button className="btn danger" onClick={() => remove(t)}>
+                    删除整批
+                  </button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
+      {/* ✅ 选中标签才显示下方列表；取消选中则不显示 */}
       {selectedTag && (
         <>
           <div className="space" />
@@ -356,7 +360,9 @@ export function Tags(props: {
                     </div>
                   </div>
                   <div className="row" style={{ flexShrink: 0 }}>
-                    <button className="btn" onClick={() => setEditing(c)}>编辑</button>
+                    <button className="btn" onClick={() => setEditing(c)}>
+                      编辑
+                    </button>
                   </div>
                 </div>
               </div>
