@@ -47,6 +47,30 @@ export function Cards(props: {
   const canCreate = props.tags.length > 0;
   const tagIdForCreate = createTagId || props.tags[0]?.id || "";
 
+  // ✅ 小字显示：按模块类型切换
+  function renderSubLine(c: AnyCard) {
+    if (props.type === "vocab") {
+      const reading = (c as any).reading ?? "";
+      const meaning = (c as any).meaning ?? "";
+      return (
+        <div className="muted">
+          {reading ? `读音：${reading}` : "读音：-"}
+          {meaning ? ` ｜ 意思：${meaning}` : " ｜ 意思：-"}
+        </div>
+      );
+    }
+
+    // grammar
+    const connect = (c as any).connect ?? "";
+    const meaning = (c as any).meaning ?? "";
+    return (
+      <div className="muted">
+        {connect ? `接续：${connect}` : "接续：-"}
+        {meaning ? ` ｜ 意思：${meaning}` : " ｜ 意思：-"}
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>配合管理</h3>
@@ -114,11 +138,11 @@ export function Cards(props: {
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{c.front}</div>
-              <div className="muted">
-                标签：{props.tags.find((t) => t.id === c.tagId)?.name ?? "(已删标签)"} ｜ 到期：
-                {c.srs.dueAt === 0 ? " 新卡" : new Date(c.srs.dueAt).toLocaleDateString()}
-              </div>
+
+              {/* ✅ 改这里：不显示 标签/到期，按模块显示 读音/意思 或 接续/意思 */}
+              {renderSubLine(c)}
             </div>
+
             <div className="row">
               <button className="btn" onClick={() => { setEditing(c); setCreating(false); }}>编辑</button>
               <button className="btn danger" onClick={() => remove(c.id)}>删除</button>
