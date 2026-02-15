@@ -5,10 +5,35 @@ import { deleteTagAndCards, putCards, putCard, putTag } from "../db";
 import { Toast } from "./Toast";
 import { EditCard } from "./EditCard";
 
-// ✅ 云端同步：读取登录状态 + 批量 upsert + 云端拉取
 import { supabase } from "../supabase";
 import { cloudUpsertTags, cloudUpsertCards } from "../cloud";
 import { syncFromCloud } from "../sync";
+
+// ✅ 本地/云端同步状态：localStorage keys
+const dirtyKey = (type: DeckType) => `srs_dirty_${type}`;
+const lastPushKey = (type: DeckType) => `srs_last_push_${type}`;
+const lastPullKey = (type: DeckType) => `srs_last_pull_${type}`;
+
+function markDirty(type: DeckType) {
+  localStorage.setItem(dirtyKey(type), "1");
+}
+function clearDirty(type: DeckType) {
+  localStorage.removeItem(dirtyKey(type));
+}
+function setLastPush(type: DeckType) {
+  localStorage.setItem(lastPushKey(type), String(Date.now()));
+}
+function setLastPull(type: DeckType) {
+  localStorage.setItem(lastPullKey(type), String(Date.now()));
+}
+function fmt(ts?: number | null) {
+  if (!ts) return "-";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return "-";
+  }
+}
 
 export function Tags(props: {
   type: DeckType;
@@ -23,13 +48,16 @@ export function Tags(props: {
   const [busy, setBusy] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
 
+  // ✅ 用来触发“状态小字”重算
+  const [statusTick, setStatusTick] = useState(0);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 1600);
     return () => clearTimeout(t);
   }, [toast]);
 
-  // ✅ 读取登录状态（用于启用/禁用 上传/导入 按钮）
+  // ✅ 读取登录状态
   useEffect(() => {
     const run = async () => {
       const { data } = await supabase.auth.getSession();
@@ -39,6 +67,7 @@ export function Tags(props: {
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setSessionEmail(session?.user.email ?? null);
+      setStatusTick((x) => x + 1);
     });
 
     return () => sub.subscription.unsubscribe();
@@ -50,7 +79,6 @@ export function Tags(props: {
     return m;
   }, [props.cards]);
 
-  // ✅ null 表示“未选中任何标签”（不显示下方列表）
   const selectedTag = useMemo(() => {
     if (props.activeTagId === "ALL") return null;
     return props.tags.find((t) => t.id === props.activeTagId) ?? null;
@@ -61,6 +89,18 @@ export function Tags(props: {
     return props.cards.filter((c) => c.tagId === selectedTag.id);
   }, [props.cards, selectedTag]);
 
+  // ✅ 云端状态小字（已同步 / 未上传）
+  const syncHint = useMemo(() => {
+    const dirty = localStorage.getItem(dirtyKey(props.type)) === "1";
+    const lp = Number(localStorage.getItem(lastPushKey(props.type)) || "0");
+    const ll = Number(localStorage.getItem(lastPullKey(props.type)) || "0");
+
+    if (!sessionEmail) {
+      return `未登录｜本地数据：IndexedDB（状态：${dirty ? "有本地改动未上传" : "未检测到未上传改动"}）｜上次上传：${fmt(lp)}｜上次导入：${fmt(ll)}`;
+    }
+    return `${dirty ? "⚠️ 本地有未上传改动" : "✅ 当前看起来已与云端同步"}｜上次上传：${fmt(lp)}｜上次导入：${fmt(ll)}`;
+  }, [props.type, sessionEmail, statusTick]);
+
   async function onImport(file?: File | null) {
     if (!file) return;
     try {
@@ -68,8 +108,13 @@ export function Tags(props: {
       const tag: BatchTag = { id: tagId, type: props.type, name: tagName, createdAt: Date.now() };
       await putTag(tag);
       await putCards(cards);
+
+      // ✅ 导入 CSV 属于本地改动
+      markDirty(props.type);
+      setStatusTick((x) => x + 1);
+
       await props.onRefresh();
-      props.setActiveTagId(tagId); // 导入后自动选中该标签
+      props.setActiveTagId(tagId);
       setEditing(null);
       setToast(`导入成功：${cards.length} 张（标签：${tagName}）`);
     } catch (e: any) {
@@ -81,6 +126,11 @@ export function Tags(props: {
     const name = prompt("请输入新的标签名：", tag.name);
     if (!name) return;
     await putTag({ ...tag, name: name.trim() });
+
+    // ✅ 改名属于本地改动
+    markDirty(props.type);
+    setStatusTick((x) => x + 1);
+
     await props.onRefresh();
     setToast("已修改标签名");
   }
@@ -95,6 +145,11 @@ export function Tags(props: {
     }
 
     await deleteTagAndCards(tag.id);
+
+    // ✅ 删除属于本地改动
+    markDirty(props.type);
+    setStatusTick((x) => x + 1);
+
     await props.onRefresh();
     setToast("已删除标签及其卡片");
   }
@@ -102,6 +157,11 @@ export function Tags(props: {
   async function saveEdit(card: AnyCard) {
     await putCard(card);
     setEditing(null);
+
+    // ✅ 编辑属于本地改动
+    markDirty(props.type);
+    setStatusTick((x) => x + 1);
+
     await props.onRefresh();
     setToast("已保存");
   }
@@ -116,7 +176,7 @@ export function Tags(props: {
     }
   }
 
-  // ✅ 上传（本机→云端）：批量 upsert（更快、更稳定）
+  // ✅ 上传（本机→云端）
   async function pushLocalToCloud() {
     if (!sessionEmail) {
       setToast("请先在首页登录，再进行云同步。");
@@ -127,9 +187,13 @@ export function Tags(props: {
       const localTags = props.tags.filter((t) => t.type === props.type);
       const localCards = props.cards.filter((c) => c.type === props.type);
 
-      // 先推 tags 再推 cards（避免云端出现孤儿卡片）
       if (localTags.length > 0) await cloudUpsertTags(localTags);
       if (localCards.length > 0) await cloudUpsertCards(localCards);
+
+      // ✅ 上传成功：清掉“未上传”标记，记录时间
+      clearDirty(props.type);
+      setLastPush(props.type);
+      setStatusTick((x) => x + 1);
 
       setToast(`上传完成：标签 ${localTags.length} 个，卡片 ${localCards.length} 张（本机→云端）`);
     } catch (e: any) {
@@ -149,6 +213,12 @@ export function Tags(props: {
     try {
       await syncFromCloud(props.type);
       await props.onRefresh();
+
+      // ✅ 导入成功：本机已对齐云端（至少刚同步完）
+      clearDirty(props.type);
+      setLastPull(props.type);
+      setStatusTick((x) => x + 1);
+
       setToast("导入完成：已从云端拉取最新数据（云端→本机）");
     } catch (e: any) {
       setToast(`导入失败：${e?.message ?? "未知错误"}`);
@@ -161,6 +231,11 @@ export function Tags(props: {
     <div className="card">
       <h3 style={{ marginTop: 0 }}>标签（批次）</h3>
 
+      {/* ✅ 你要的：显示在“标签（批次）”下面的小字 */}
+      <div className="muted">{syncHint}</div>
+
+      <div className="space" />
+
       <div className="muted">
         固定 CSV 表头：
         {props.type === "vocab"
@@ -170,7 +245,7 @@ export function Tags(props: {
 
       <div className="space" />
 
-      {/* ✅ 两按钮夹在“云同步状态”下面 */}
+      {/* ✅ 上传/导入按钮 */}
       <div className="row">
         <button className="btn primary" onClick={pushLocalToCloud} disabled={busy || !sessionEmail}>
           上传（本机→云端）
@@ -251,12 +326,8 @@ export function Tags(props: {
               <div className="space" />
 
               <div className="row" onClick={(e) => e.stopPropagation()}>
-                <button className="btn" onClick={() => rename(t)}>
-                  改名
-                </button>
-                <button className="btn danger" onClick={() => remove(t)}>
-                  删除整批
-                </button>
+                <button className="btn" onClick={() => rename(t)}>改名</button>
+                <button className="btn danger" onClick={() => remove(t)}>删除整批</button>
               </div>
             </div>
           );
@@ -277,17 +348,15 @@ export function Tags(props: {
           ) : (
             cardsInSelectedTag.map((c) => (
               <div key={c.id} className="card" style={{ padding: 12, marginBottom: 10 }}>
-                <div className="row" style={{ justifyContent: "space-between" }}>
-                  <div>
+                <div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 800, fontSize: 16 }}>{c.front}</div>
                     <div className="muted">
                       到期：{c.srs.dueAt === 0 ? " 新卡" : new Date(c.srs.dueAt).toLocaleDateString()}
                     </div>
                   </div>
-                  <div className="row">
-                    <button className="btn" onClick={() => setEditing(c)}>
-                      编辑
-                    </button>
+                  <div className="row" style={{ flexShrink: 0 }}>
+                    <button className="btn" onClick={() => setEditing(c)}>编辑</button>
                   </div>
                 </div>
               </div>

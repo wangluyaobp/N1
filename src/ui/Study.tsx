@@ -44,6 +44,7 @@ export function Study(props: {
 
     // 1) 本地保存（离线也可用）
     await putCard(updated);
+    localStorage.setItem(`srs_dirty_${props.type}`, "1");
 
     // 2) ✅ 云端保存（失败不影响本地；用于跨设备共享学习进度）
     let cloudOk = false;
